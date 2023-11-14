@@ -1,0 +1,30 @@
+{
+  "canisters": {
+    "note_backend": {
+      "candid": "src/note_backend/note_backend.did",
+      "package": "note_backend",
+      "type": "rust"
+    },
+    "note_frontend": {
+      "dependencies": [
+        "note_backend"
+      ],
+      "frontend": {
+        "entrypoint": "src/note_frontend/src/index.html"
+      },
+      "source": [
+        "src/note_frontend/assets",
+        "dist/note_frontend/"
+      ],
+      "type": "assets"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
