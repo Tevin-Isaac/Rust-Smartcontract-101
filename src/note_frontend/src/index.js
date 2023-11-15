@@ -2,8 +2,17 @@ import { note_backend } from "../../declarations/note_backend";
 
 // Function to add a new note
 async function addNote() {
-  const title = document.getElementById("title").value.toString();
-  const content = document.getElementById("content").value.toString();
+  const titleElement = document.getElementById("title");
+  const contentElement = document.getElementById("content");
+
+  // Input validation
+  const title = titleElement.value.trim();
+  const content = contentElement.value.trim();
+
+  if (!title || !content) {
+    console.error('Title and content cannot be empty');
+    return;
+  }
 
   try {
     // Interact with the note_backend canister, calling the add_note method
@@ -15,8 +24,9 @@ async function addNote() {
     // Fetch all notes after adding a new one
     await getAllNotes();
   } catch (error) {
-    // Handle errors
-    console.error('Error adding note:', error);
+    // Handle errors with more details
+    console.error('Error adding note:', error.message || error);
+    // Optionally display an error message to the user
   }
 }
 
@@ -29,18 +39,25 @@ async function getAllNotes() {
     // Optionally, you can update the UI to display the retrieved notes or perform other actions
     console.log('All Notes:', notes);
   } catch (error) {
-    // Handle errors
-    console.error('Error getting all notes:', error);
+    // Handle errors with more details
+    console.error('Error getting all notes:', error.message || error);
+    // Optionally display an error message to the user
   }
 }
 
 // Event listener for form submission
 document.querySelector("#addNoteForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  await addNote();
+  try {
+    await addNote();
+  } catch (error) {
+    // Handle errors with more details
+    console.error('Error submitting form:', error.message || error);
+    // Optionally display an error message to the user
+  }
 });
 
-// Optional: Call getAllNotes on page load
-window.onload = function () {
+// Optional: Call getAllNotes on window load
+window.addEventListener('load', function () {
   getAllNotes();
-};
+});
