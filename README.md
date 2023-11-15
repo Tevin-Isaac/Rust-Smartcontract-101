@@ -1,8 +1,11 @@
 # note
 
-Welcome to your new note project and to the internet computer development community. By default, creating a new project adds this README and some template files to your project directory. You can edit these template files to customize your project and to include your own code to speed up the development cycle.
+- This Rust code defines a basic note-taking canister for the Internet Computer, allowing users to manage notes through a set of functions.It also has a frontend that interacts with it.
 
-To get started, you might want to explore the project directory structure and the default configuration file. Working with this project in your development environment will not affect any production deployment or identity tokens.
+
+
+- Users can interact with the canister to perform CRUD (Create, Read, Update, Delete) operations on notes.
+- Functions such as get_note, add_note, update_note, and delete_note are provided for these operations.
 
 To learn more before you start working with note, see the following documentation available online:
 
