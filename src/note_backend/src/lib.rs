@@ -1,13 +1,11 @@
-#[macro_use]
 extern crate serde;
 use candid::{Decode, Encode};
 use ic_cdk::api::time;
-use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
-use std::{borrow::Cow, cell::RefCell};
+use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
+use ic_stable_structures::{BoundedStorable, DefaultMemoryImpl, StableBTreeMap, Storable};
+use std::{borrow::Cow, sync::{Arc, Mutex}};
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
-type IdCell = Cell<u64, Memory>;
 
 #[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
 struct Note {
@@ -20,11 +18,11 @@ struct Note {
 
 impl Storable for Note {
     fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
+        Cow::Owned(Encode!(self).expect("Serialization failed"))
     }
 
     fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
+        Decode!(bytes.as_ref(), Self).expect("Deserialization failed")
     }
 }
 
@@ -33,85 +31,10 @@ impl BoundedStorable for Note {
     const IS_FIXED_SIZE: bool = false;
 }
 
-thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> = RefCell::new(
-        MemoryManager::init(DefaultMemoryImpl::default())
-    );
-
-    static ID_COUNTER: RefCell<IdCell> = RefCell::new(
-        IdCell::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))), 0)
-            .expect("Cannot create a counter")
-    );
-
-    static NOTES_STORAGE: RefCell<StableBTreeMap<u64, Note, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1)))
-    ));
-}
-
 #[derive(candid::CandidType, Serialize, Deserialize, Default)]
 struct NotePayload {
     title: String,
     content: String,
-}
-
-#[ic_cdk::query]
-fn get_note(id: u64) -> Result<Note, Error> {
-    match _get_note(&id) {
-        Some(note) => Ok(note),
-        None => Err(Error::NotFound {
-            msg: format!("A note with id={} not found", id),
-        }),
-    }
-}
-
-#[ic_cdk::update]
-fn add_note(note_payload: NotePayload) -> Option<Note> {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment id counter");
-    let note = Note {
-        id,
-        title: note_payload.title,
-        content: note_payload.content,
-        created_at: time(),
-        updated_at: None,
-    };
-    do_insert(&note);
-    Some(note)
-}
-
-#[ic_cdk::update]
-fn update_note(id: u64, payload: NotePayload) -> Result<Note, Error> {
-    match NOTES_STORAGE.with(|storage| storage.borrow().get(&id)) {
-        Some(mut note) => {
-            note.content = payload.content;
-            note.title = payload.title;
-            note.updated_at = Some(time());
-            do_insert(&note);
-            Ok(note)
-        }
-        None => Err(Error::NotFound {
-            msg: format!("Couldn't update a note with id={}. Note not found", id),
-        }),
-    }
-}
-
-fn do_insert(note: &Note) {
-    NOTES_STORAGE.with(|storage| storage.borrow_mut().insert(note.id, note.clone()));
-}
-
-#[ic_cdk::update]
-fn delete_note(id: u64) -> Result<Note, Error> {
-    match NOTES_STORAGE.with(|storage| storage.borrow_mut().remove(&id)) {
-        Some(note) => Ok(note),
-        None => Err(Error::NotFound {
-            msg: format!("Couldn't delete a note with id={}. Note not found", id),
-        }),
-    }
 }
 
 #[derive(candid::CandidType, Deserialize, Serialize)]
@@ -119,8 +42,74 @@ enum Error {
     NotFound { msg: String },
 }
 
-fn _get_note(id: &u64) -> Option<Note> {
-    NOTES_STORAGE.with(|storage| storage.borrow().get(id))
+struct NoteService {
+    memory_manager: MemoryManager<DefaultMemoryImpl>,
+    id_counter: Arc<Mutex<u64>>,
+    notes_storage: StableBTreeMap<u64, Note, Memory>,
+}
+
+impl NoteService {
+    fn new() -> Self {
+        let memory_manager = MemoryManager::init(DefaultMemoryImpl::default());
+        let id_counter = Arc::new(Mutex::new(0));
+        let notes_storage = StableBTreeMap::init(memory_manager.get(MemoryId::new(1)));
+        
+        NoteService {
+            memory_manager,
+            id_counter,
+            notes_storage,
+        }
+    }
+
+    fn get_note_by_id(&self, id: u64) -> Result<Note, Error> {
+        match self.notes_storage.get(&id) {
+            Some(note) => Ok(note.clone()),
+            None => Err(Error::NotFound {
+                msg: format!("A note with id={} not found", id),
+            }),
+        }
+    }
+
+    fn add_note(&self, note_payload: NotePayload) -> Result<Note, Error> {
+        let mut id_counter = self.id_counter.lock().expect("Mutex lock failed");
+        let id = *id_counter;
+        *id_counter += 1;
+
+        let note = Note {
+            id,
+            title: note_payload.title,
+            content: note_payload.content,
+            created_at: time(),
+            updated_at: None,
+        };
+
+        self.notes_storage.insert(note.id, note.clone());
+        Ok(note)
+    }
+
+    fn update_note(&self, id: u64, payload: NotePayload) -> Result<Note, Error> {
+        if let Some(mut note) = self.notes_storage.get(&id).cloned() {
+            note.content = payload.content;
+            note.title = payload.title;
+            note.updated_at = Some(time());
+            self.notes_storage.insert(note.id, note.clone());
+            Ok(note)
+        } else {
+            Err(Error::NotFound {
+                msg: format!("Couldn't update a note with id={}. Note not found", id),
+            })
+        }
+    }
+
+    fn delete_note(&self, id: u64) -> Result<Note, Error> {
+        if let Some(note) = self.notes_storage.remove(&id) {
+            Ok(note)
+        } else {
+            Err(Error::NotFound {
+                msg: format!("Couldn't delete a note with id={}. Note not found", id),
+            })
+        }
+    }
 }
 
 ic_cdk::export_candid!();
