@@ -1,3 +1,16 @@
+type Error = variant { NotFound : record { msg : text } };
+type Note = record {
+  id : nat64;
+  title : text;
+  updated_at : opt nat64;
+  content : text;
+  created_at : nat64;
+};
+type NotePayload = record { title : text; content : text };
+type Result = variant { Ok : Note; Err : Error };
 service : {
-    "greet": (text) -> (text) query;
+  add_note : (NotePayload) -> (opt Note);
+  delete_note : (nat64) -> (Result);
+  get_note : (nat64) -> (Result) query;
+  update_note : (nat64, NotePayload) -> (Result);
 }

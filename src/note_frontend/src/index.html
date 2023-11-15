@@ -3,22 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <title>note</title>
+    <title>Note Taking App</title>
     <base href="/" />
-    <link rel="icon" href="favicon.ico" />
     <link type="text/css" rel="stylesheet" href="main.css" />
   </head>
   <body>
     <main>
       <img src="logo2.svg" alt="DFINITY logo" />
-      <br />
-      <br />
-      <form action="#">
-        <label for="name">Enter your name: &nbsp;</label>
-        <input id="name" alt="Name" type="text" />
-        <button type="submit">Click Me!</button>
+      <h1>Note Taking App</h1>
+
+      <!-- Form to add a new note -->
+      <form id="addNoteForm">
+        <label for="title">Title:</label>
+        <input id="title" type="text" placeholder="Enter note title" required />
+        <br />
+        <label for="content">Content:</label>
+        <textarea id="content" placeholder="Enter note content" required></textarea>
+        <br />
+        <button type="button" onclick="addNote()">Add Note</button>
       </form>
-      <section id="greeting"></section>
+
+      <!-- Display all notes -->
+      <div id="notesList">
+        <!-- Notes will be displayed here -->
+      </div>
+
     </main>
+
+    <script src="index.js"></script>
   </body>
 </html>
