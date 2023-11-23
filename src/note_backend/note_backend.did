@@ -8,9 +8,11 @@ type Note = record {
 };
 type NotePayload = record { title : text; content : text };
 type Result = variant { Ok : Note; Err : Error };
+type Result_1 = variant { Ok : vec Note; Err : Error };
 service : {
   add_note : (NotePayload) -> (opt Note);
   delete_note : (nat64) -> (Result);
+  get_all_notes : () -> (Result_1) query;
   get_note : (nat64) -> (Result) query;
   update_note : (nat64, NotePayload) -> (Result);
 }

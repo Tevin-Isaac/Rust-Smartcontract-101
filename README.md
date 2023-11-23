@@ -42,6 +42,7 @@ Once the job completes, your application will be available at `http://localhost:
 If you have made changes to your backend canister, you can generate a new candid interface with
 
 ```bash
+# Remember to have the did.sh file executable you can run `chmod  u+x did.sh` in the directory that it is in
 npm run generate
 ```
 
@@ -52,6 +53,11 @@ If you are making frontend changes, you can start a development server with
 ```bash
 npm start
 ```
+if an error occurs based on frontend try running:
+```bash
+npm install 
+```
+after which run again `npm start`
 
 Which will start a server at `http://localhost:8080`, proxying API requests to the replica at port 4943.
 
