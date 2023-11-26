@@ -75,13 +75,13 @@ fn get_note(id: u64) -> Result<Note, Error> {
 #[ic_cdk::query]
 fn get_all_notes() -> Result<Vec<Note>, Error>{
     let notes_map: Vec<(u64,Note)> = NOTES_STORAGE.with(|service| service.borrow().iter().collect());
-    let notes: Vec<Note> = notes_map.into_iter().map(|(_, crop)| crop).collect();
+    let notes: Vec<Note> = notes_map.into_iter().map(|(_, note)| note).collect();
 
     if !notes.is_empty(){
         Ok(notes)
     }else {
         Err(Error::NotFound{
-            msg: "No crops found.".to_string(),
+            msg: "No notes found.".to_string(),
         })
     }
 }
