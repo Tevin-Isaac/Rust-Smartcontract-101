@@ -19,6 +19,7 @@ struct Note {
     content: String,
     created_at: u64,
     updated_at: Option<u64>,
+    tag_ids: Vec<u64>,
 }
 
 // Implement Storable and BoundedStorable traits for Note 
@@ -36,6 +37,52 @@ impl BoundedStorable for Note {
     const MAX_SIZE: u32 = 1024;
     const IS_FIXED_SIZE: bool = false;
 }
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+struct Tag {
+    id: u64,
+    name: String,
+}
+
+impl Storable for Tag {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+}
+
+impl BoundedStorable for Tag {
+    const MAX_SIZE: u32 = 1024; // Example size, adjust as needed
+    const IS_FIXED_SIZE: bool = false;
+}
+
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+struct NoteVersion {
+    id: u64,
+    note_id: u64,
+    title: String,
+    content: String,
+    version_number: u64,
+    created_at: u64,
+}
+
+impl Storable for NoteVersion {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+}
+
+impl BoundedStorable for NoteVersion {
+    const MAX_SIZE: u32 = 1024; // Adjust as necessary
+    const IS_FIXED_SIZE: bool = false;
+}
+
 
 // Define Memory manager and ID counter
 thread_local! {
@@ -52,11 +99,28 @@ thread_local! {
         RefCell::new(StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1)))
     ));
+    static TAG_STORAGE: RefCell<StableBTreeMap<u64, Tag, Memory>> =
+        RefCell::new(StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))) // Assuming MemoryId::new(2) is for tags
+    ));
+    static NOTE_VERSION_STORAGE: RefCell<StableBTreeMap<u64, NoteVersion, Memory>> =
+        RefCell::new(StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(4))) // Assuming MemoryId::new(4) is for note versions
+    ));
 }
 
 // Define the NotePyload structure for creating/updating notes
 #[derive(candid::CandidType, Serialize, Deserialize, Default)]
 struct NotePayload {
+    title: String,
+    content: String,
+}
+#[derive(candid::CandidType, Serialize, Deserialize, Default)]
+struct TagPayload {
+    name: String,
+}
+#[derive(candid::CandidType, Serialize, Deserialize, Default)]
+struct NoteVersionPayload {
     title: String,
     content: String,
 }
@@ -103,6 +167,7 @@ fn add_note(note_payload: NotePayload) -> Option<Note> {
         content: note_payload.content,
         created_at: time(),
         updated_at: None,
+        tag_ids: Vec::new(),
     };
     
     // Insert the note 
@@ -143,6 +208,179 @@ fn delete_note(id: u64) -> Result<Note, Error> {
         }),
     }
 }
+#[ic_cdk::update]
+fn add_tag(payload: TagPayload) -> Result<Tag, String> {
+    TAG_STORAGE.with(|storage| {
+        let storage_ref = storage.borrow();
+        let exists = storage_ref.iter().any(|(_, tag)| tag.name == payload.name);
+        if exists {
+            Err("Tag with this name already exists".to_string())
+        } else {
+            let id = ID_COUNTER.with(|counter| {
+                let current_value = *counter.borrow().get();
+                counter.borrow_mut().set(current_value + 1).unwrap();
+                current_value
+            });
+            let tag = Tag { id, name: payload.name };
+            storage.borrow_mut().insert(id, tag.clone());
+            Ok(tag)
+        }
+    })
+}
+
+#[ic_cdk::query]
+fn list_all_tags() -> Vec<Tag> {
+    TAG_STORAGE.with(|storage| {
+        storage.borrow().iter().map(|(_, tag)| tag.clone()).collect()
+    })
+}
+
+#[ic_cdk::update]
+fn update_tag(id: u64, payload: TagPayload) -> Result<Tag, String> {
+    TAG_STORAGE.with(|storage| {
+        let mut storage = storage.borrow_mut();
+        if let Some(tag) = storage.remove(&id) {
+            let updated_tag = Tag { name: payload.name, ..tag };
+            storage.insert(id, updated_tag.clone());
+            Ok(updated_tag)
+        } else {
+            Err("Tag not found".to_string())
+        }
+    })
+}
+#[ic_cdk::update]
+fn delete_tag(id: u64) -> Result<(), String> {
+    TAG_STORAGE.with(|storage| {
+        if storage.borrow_mut().remove(&id).is_some() {
+            Ok(())
+        } else {
+            Err("Tag not found".to_string())
+        }
+    })
+}
+#[ic_cdk::update]
+fn assign_tag_to_note(note_id: u64, tag_id: u64) -> Result<(), String> {
+    NOTES_STORAGE.with(|notes| {
+        let mut notes = notes.borrow_mut();
+        if let Some(mut note) = notes.remove(&note_id) {
+            if !note.tag_ids.contains(&tag_id) {
+                note.tag_ids.push(tag_id);
+                notes.insert(note_id, note);
+                Ok(())
+            } else {
+                Err("Tag already assigned to this note".to_string())
+            }
+        } else {
+            Err("Note not found".to_string())
+        }
+    })
+}
+
+#[ic_cdk::update]
+fn remove_tag_from_note(note_id: u64, tag_id: u64) -> Result<(), String> {
+    NOTES_STORAGE.with(|notes| {
+        let mut notes = notes.borrow_mut();
+        if let Some(mut note) = notes.remove(&note_id) {
+            note.tag_ids.retain(|&id| id != tag_id);
+            notes.insert(note_id, note);
+            Ok(())
+        } else {
+            Err("Note not found".to_string())
+        }
+    })
+}
+
+#[ic_cdk::query]
+fn get_notes_by_tag(tag_id: u64) -> Result<Vec<Note>, String> {
+    NOTES_STORAGE.with(|notes| {
+        let notes = notes.borrow();
+        let filtered_notes = notes
+            .iter()
+            .filter(|(_, note)| note.tag_ids.contains(&tag_id))
+            .map(|(_, note)| note.clone())
+            .collect::<Vec<Note>>();
+        
+        if !filtered_notes.is_empty() {
+            Ok(filtered_notes)
+        } else {
+            Err("No notes found for this tag".to_string())
+        }
+    })
+}
+#[ic_cdk::update]
+fn create_note_version(note_id: u64, payload: NoteVersionPayload) -> Result<NoteVersion, String> {
+    let version_number = NOTE_VERSION_STORAGE.with(|storage| {
+        let versions = storage.borrow();
+        versions.iter().filter(|(_, v)| v.note_id == note_id).count() as u64 + 1
+    });
+
+    let new_version = NoteVersion {
+        id: ID_COUNTER.with(|c| { let val = *c.borrow().get(); c.borrow_mut().set(val + 1).unwrap(); val }),
+        note_id,
+        title: payload.title,
+        content: payload.content,
+        version_number,
+        created_at: time(),
+    };
+
+    NOTE_VERSION_STORAGE.with(|storage| {
+        storage.borrow_mut().insert(new_version.id, new_version.clone());
+    });
+    Ok(new_version)
+}
+#[ic_cdk::query]
+fn get_note_version(version_id: u64) -> Result<NoteVersion, String> {
+    NOTE_VERSION_STORAGE.with(|storage| {
+        match storage.borrow().get(&version_id) {
+            Some(note_version) => Ok(note_version.clone()),
+            None => Err("Note version not found".to_string()),
+        }
+    })
+}
+
+
+
+
+
+#[ic_cdk::query]
+fn list_note_versions(note_id: u64) -> Vec<NoteVersion> {
+    NOTE_VERSION_STORAGE.with(|storage| {
+        storage.borrow().iter().filter(|(_, v)| v.note_id == note_id).map(|(_, v)| v.clone()).collect()
+    })
+}
+#[ic_cdk::update]
+fn revert_to_version(note_id: u64, version_id: u64) -> Result<Note, String> {
+    let version = get_note_version(version_id)?;
+    if version.note_id != note_id {
+        return Err("Version does not match the note".to_string());
+    }
+
+    NOTES_STORAGE.with(|storage| {
+        let mut storage = storage.borrow_mut();
+        if let Some(mut note) = storage.remove(&note_id) {
+            note.title = version.title;
+            note.content = version.content;
+            note.updated_at = Some(time());
+            storage.insert(note_id, note.clone());
+            Ok(note)
+        } else {
+            Err("Note not found".to_string())
+        }
+    })
+}
+
+#[ic_cdk::update]
+fn delete_note_version(version_id: u64) -> Result<(), String> {
+    NOTE_VERSION_STORAGE.with(|storage| {
+        if storage.borrow_mut().remove(&version_id).is_some() {
+            Ok(())
+        } else {
+            Err("Note version not found".to_string())
+        }
+    })
+}
+
+
 
 // Define the error enum for handling errors
 #[derive(candid::CandidType, Deserialize, Serialize)]
