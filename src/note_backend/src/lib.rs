@@ -211,22 +211,27 @@ fn delete_note(id: u64) -> Result<Note, Error> {
 #[ic_cdk::update]
 fn add_tag(payload: TagPayload) -> Result<Tag, String> {
     TAG_STORAGE.with(|storage| {
-        let storage_ref = storage.borrow();
-        let exists = storage_ref.iter().any(|(_, tag)| tag.name == payload.name);
-        if exists {
-            Err("Tag with this name already exists".to_string())
-        } else {
-            let id = ID_COUNTER.with(|counter| {
-                let current_value = *counter.borrow().get();
-                counter.borrow_mut().set(current_value + 1).unwrap();
-                current_value
-            });
-            let tag = Tag { id, name: payload.name };
-            storage.borrow_mut().insert(id, tag.clone());
-            Ok(tag)
-        }
+        // Check if tag already exists
+        {
+            let storage_ref = storage.borrow(); // Immutable borrow
+            if storage_ref.iter().any(|(_, tag)| tag.name == payload.name) {
+                return Err("Tag with this name already exists".to_string());
+            }
+        } // Immutable borrow is dropped here
+
+        // Add new tag
+        let id = ID_COUNTER.with(|counter| {
+            let current_value = *counter.borrow().get();
+            counter.borrow_mut().set(current_value + 1).unwrap();
+            current_value
+        });
+
+        let tag = Tag { id, name: payload.name };
+        storage.borrow_mut().insert(id, tag.clone()); // Mutable borrow
+        Ok(tag)
     })
 }
+
 
 #[ic_cdk::query]
 fn list_all_tags() -> Vec<Tag> {
