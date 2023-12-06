@@ -5,7 +5,7 @@
 
 
 - Users can interact with the canister to perform CRUD (Create, Read, Update, Delete) operations on notes.
-- Functions such as get_note, add_note, update_note, and delete_note are provided for these operations.
+- It features various functions that have been implemented on the note application.
 
 To learn more before you start working with note, see the following documentation available online:
 
