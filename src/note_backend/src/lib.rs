@@ -385,6 +385,84 @@ fn delete_note_version(version_id: u64) -> Result<(), String> {
     })
 }
 
+#[ic_cdk::query]
+fn search_notes(query: String) -> Result<Vec<Note>, Error> {
+    let notes_map: Vec<(u64, Note)> = NOTES_STORAGE
+        .with(|service| service.borrow().iter().filter(|(_, note)| note.title.contains(&query) || note.content.contains(&query)).collect());
+    let notes: Vec<Note> = notes_map.into_iter().map(|(_, note)| note).collect();
+
+    if !notes.is_empty() {
+        Ok(notes)
+    } else {
+        Err(Error::NotFound {
+            msg: format!("No notes found matching the query: '{}'", query),
+        })
+    }
+}
+
+#[ic_cdk::query]
+fn get_tags_for_note(note_id: u64) -> Result<Vec<Tag>, Error> {
+    match _get_note(&note_id) {
+        Some(note) => {
+            let tags_map: Vec<(u64, Tag)> = TAG_STORAGE
+                .with(|service| service.borrow().iter().filter(|(_, tag)| note.tag_ids.contains(&tag.id)).collect());
+            let tags: Vec<Tag> = tags_map.into_iter().map(|(_, tag)| tag).collect();
+            Ok(tags)
+        }
+        None => Err(Error::NotFound {
+            msg: format!("Note with id={} not found", note_id),
+        }),
+    }
+}
+#[ic_cdk::query]
+fn count_notes_by_tag(tag_id: u64) -> Result<usize, String> {
+    NOTES_STORAGE.with(|notes| {
+        let notes = notes.borrow();
+        let count = notes.iter().filter(|(_, note)| note.tag_ids.contains(&tag_id)).count();
+        Ok(count)
+    })
+}
+#[ic_cdk::query]
+fn list_note_titles_by_tag(tag_id: u64) -> Result<Vec<String>, String> {
+    NOTES_STORAGE.with(|notes| {
+        let notes = notes.borrow();
+        let filtered_notes = notes
+            .iter()
+            .filter(|(_, note)| note.tag_ids.contains(&tag_id))
+            .map(|(_, note)| note.title.clone())
+            .collect::<Vec<String>>();
+        
+        if !filtered_notes.is_empty() {
+            Ok(filtered_notes)
+        } else {
+            Err("No notes found for this tag".to_string())
+        }
+    })
+}
+#[ic_cdk::query]
+fn get_notes_updated_within_range(start_time: u64, end_time: u64) -> Result<Vec<Note>, String> {
+    NOTES_STORAGE.with(|notes| {
+        let notes = notes.borrow();
+        let filtered_notes = notes
+            .iter()
+            .filter(|(_, note)| {
+                if let Some(updated_at) = note.updated_at {
+                    updated_at >= start_time && updated_at <= end_time
+                } else {
+                    false
+                }
+            })
+            .map(|(_, note)| note.clone())
+            .collect::<Vec<Note>>();
+
+        if !filtered_notes.is_empty() {
+            Ok(filtered_notes)
+        } else {
+            Err("No notes found within the specified time range".to_string())
+        }
+    })
+}
+
 
 
 // Define the error enum for handling errors
