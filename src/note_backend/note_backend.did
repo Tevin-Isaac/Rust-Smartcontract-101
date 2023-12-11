@@ -1,16 +1,21 @@
-type Error = variant { NotFound : record { msg : text } };
+type Error = variant {
+  ValidationFailed : record { content : text };
+  NotFound : record { msg : text };
+  AuthenticationFailed : record { msg : text };
+};
 type Note = record {
   id : nat64;
   title : text;
   updated_at : opt nat64;
   content : text;
+  owner : text;
   created_at : nat64;
 };
 type NotePayload = record { title : text; content : text };
 type Result = variant { Ok : Note; Err : Error };
 type Result_1 = variant { Ok : vec Note; Err : Error };
 service : {
-  add_note : (NotePayload) -> (opt Note);
+  add_note : (NotePayload) -> (Result);
   delete_note : (nat64) -> (Result);
   get_all_notes : () -> (Result_1) query;
   get_note : (nat64) -> (Result) query;
