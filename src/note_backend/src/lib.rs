@@ -2,7 +2,8 @@
 #[macro_use]
 extern crate serde;
 use candid::{Decode, Encode};
-use ic_cdk::api::time;
+use validator::Validate;
+use ic_cdk::api::{time, caller};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
 use std::{borrow::Cow, cell::RefCell};
@@ -15,6 +16,7 @@ type IdCell = Cell<u64, Memory>;
 #[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
 struct Note {
     id: u64,
+    owner: String,
     title: String,
     content: String,
     created_at: u64,
@@ -110,9 +112,11 @@ thread_local! {
 }
 
 // Define the NotePyload structure for creating/updating notes
-#[derive(candid::CandidType, Serialize, Deserialize, Default)]
+#[derive(candid::CandidType, Serialize, Deserialize, Default, Validate)]
 struct NotePayload {
+    #[validate(length(min = 1))]
     title: String,
+    #[validate(length(min = 1))]
     content: String,
 }
 #[derive(candid::CandidType, Serialize, Deserialize, Default)]
@@ -152,8 +156,14 @@ fn get_all_notes() -> Result<Vec<Note>, Error>{
 
 // Funcion to create a note
 #[ic_cdk::update]
-fn add_note(note_payload: NotePayload) -> Option<Note> {
-    // Inrement the ID counter
+fn add_note(note_payload: NotePayload) -> Result<Note, Error> {
+    // Validates payload
+    let check_payload = _check_input(&note_payload);
+    // Returns an error if validations failed
+    if check_payload.is_err(){
+        return Err(check_payload.err().unwrap());
+    }
+    // Increment the ID counter
     let id = ID_COUNTER
         .with(|counter| {
             let current_value = *counter.borrow().get();
@@ -163,6 +173,7 @@ fn add_note(note_payload: NotePayload) -> Option<Note> {
     // create a new note 
     let note = Note {
         id,
+        owner: caller().to_string(),
         title: note_payload.title,
         content: note_payload.content,
         created_at: time(),
@@ -172,14 +183,25 @@ fn add_note(note_payload: NotePayload) -> Option<Note> {
     
     // Insert the note 
     do_insert(&note);
-    Some(note)
+    Ok(note)
 }
 
 // Function to update note
 #[ic_cdk::update]
 fn update_note(id: u64, payload: NotePayload) -> Result<Note, Error> {
+    // Validates payload
+    let check_payload = _check_input(&payload);
+    // Returns an error if validations failed
+    if check_payload.is_err(){
+        return Err(check_payload.err().unwrap());
+    }
     match NOTES_STORAGE.with(|storage| storage.borrow().get(&id)) {
         Some(mut note) => {
+            // Validates whether caller is the owner of the note
+            let check_if_owner = _check_if_owner(&note);
+            if check_if_owner.is_err() {
+                return Err(check_if_owner.err().unwrap())
+            }
             // update the note's content, title and timestamp
             note.content = payload.content;
             note.title = payload.title;
@@ -201,6 +223,12 @@ fn do_insert(note: &Note) {
 // Function to delete note 
 #[ic_cdk::update]
 fn delete_note(id: u64) -> Result<Note, Error> {
+    let note = _get_note(&id).expect(&format!("couldn't delete a note with id={}. note not found.", id));
+    // Validates whether caller is the owner of the note
+    let check_if_owner = _check_if_owner(&note);
+    if check_if_owner.is_err() {
+        return Err(check_if_owner.err().unwrap())
+    }
     match NOTES_STORAGE.with(|storage| storage.borrow_mut().remove(&id)) {
         Some(note) => Ok(note),
         None => Err(Error::NotFound {
@@ -469,11 +497,32 @@ fn get_notes_updated_within_range(start_time: u64, end_time: u64) -> Result<Vec<
 #[derive(candid::CandidType, Deserialize, Serialize)]
 enum Error {
     NotFound { msg: String },
+    ValidationFailed { content: String},
+    AuthenticationFailed { msg: String}
 }
 
 // helper function to retrieve Note by ID
 fn _get_note(id: &u64) -> Option<Note> {
     NOTES_STORAGE.with(|storage| storage.borrow().get(id))
+}
+
+// Helper function to check the input data of the payload
+fn _check_input(payload: &NotePayload) -> Result<(), Error> {
+    let check_payload = payload.validate();
+    if check_payload.is_err() {
+        return Err(Error:: ValidationFailed{ content: check_payload.err().unwrap().to_string()})
+    }else{
+        Ok(())
+    }
+}
+
+// Helper function to check whether the caller is the owner of a note
+fn _check_if_owner(note: &Note) -> Result<(), Error> {
+    if note.owner.to_string() != caller().to_string(){
+        return Err(Error:: AuthenticationFailed{ msg: format!("Caller={} isn't the owner of the note with id={}", caller(), note.id) })  
+    }else{
+        Ok(())
+    }
 }
 
 // Export candid Interface
